@@ -8,7 +8,7 @@
 import re
 import json
 import asyncio
-from typing import Dict, List, Set, Optional, Tuple
+from typing import Dict, List, Set, Optional, Tuple, Any
 from urllib.parse import urljoin, urlparse, urldefrag, parse_qs
 from bs4 import BeautifulSoup
 from core.config import CRAWLER_CONFIG

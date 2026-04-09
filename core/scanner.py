@@ -53,7 +53,7 @@ class EnhancedWebScanner:
         self.use_async = use_async
         self.logger = Logger()
         
-        # 初始化HTTP工具(支持同步和异步)
+        # 初始化HTTP工具(同步)
         self.http_sync = HTTPUtils(
             timeout=timeout,
             cookies=cookies,
@@ -62,13 +62,15 @@ class EnhancedWebScanner:
             proxy=proxy
         )
         
-        self.http_async = AsyncHTTPUtils(
-            timeout=timeout,
-            cookies=cookies,
-            headers=headers,
-            rate_limit=rate_limit,
-            proxy=proxy
-        )
+        # 异步HTTP工具延迟初始化,避免事件循环问题
+        self.http_async = None
+        self._async_config = {
+            'timeout': timeout,
+            'cookies': cookies,
+            'headers': headers,
+            'rate_limit': rate_limit,
+            'proxy': proxy
+        }
         
         # 初始化插件管理器
         self.plugin_manager = PluginManager(plugin_dir)
@@ -95,6 +97,11 @@ class EnhancedWebScanner:
             'api_endpoints': [],
             'inputs': []
         }
+    
+    def _init_async_http(self):
+        """延迟初始化异步HTTP工具,避免事件循环问题"""
+        if self.http_async is None:
+            self.http_async = AsyncHTTPUtils(**self._async_config)
     
     async def _crawl_async(self):
         """异步执行网站爬取"""
@@ -135,23 +142,26 @@ class EnhancedWebScanner:
         self.logger.info("阶段1: 网站爬取")
         self.logger.info("=" * 60)
         
-        # 使用同步爬虫作为fallback
-        from core.crawler import WebCrawler  # 导入旧版爬虫
-        
-        crawler = WebCrawler(
+        # 使用增强版爬虫的同步包装
+        crawler = EnhancedWebCrawler(
             target=self.target,
             http_utils=self.http_sync,
             max_pages=self.max_pages
         )
         
-        crawled_data = crawler.crawl()
-        self.crawled_data = crawled_data
-        
-        # 更新统计信息
-        self.results['scan_stats']['urls_discovered'] = len(crawled_data['urls'])
-        self.results['scan_stats']['forms_discovered'] = len(crawled_data['forms'])
-        self.results['scan_stats']['params_discovered'] = len(crawled_data['params'])
-        self.results['scan_stats']['pages_crawled'] = len(crawler.visited_urls)
+        try:
+            # 在同步代码中运行异步爬虫
+            crawled_data = asyncio.run(crawler.crawl())
+            self.crawled_data = crawled_data
+            
+            # 更新统计信息
+            self.results['scan_stats']['urls_discovered'] = len(crawled_data['urls'])
+            self.results['scan_stats']['forms_discovered'] = len(crawled_data['forms'])
+            self.results['scan_stats']['params_discovered'] = len(crawled_data['params'])
+            self.results['scan_stats']['pages_crawled'] = len(crawler.visited_urls)
+            self.results['scan_stats']['api_endpoints_discovered'] = len(crawled_data.get('api_endpoints', []))
+        finally:
+            asyncio.run(crawler.close())
     
     async def _scan_async(self):
         """异步执行漏洞扫描"""
@@ -328,6 +338,9 @@ class EnhancedWebScanner:
         """
         开始完整扫描(异步模式)
         """
+        # 初始化异步HTTP工具
+        self._init_async_http()
+        
         self.logger.info(f"开始扫描目标: {self.target}")
         self.logger.info(f"扫描模式: 异步并发")
         start_time = time.time()
