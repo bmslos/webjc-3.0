@@ -1,20 +1,26 @@
-# Web Vulnerability Scanner Pro v3.0
+# Web Vulnerability Scanner Pro v3.1
 
 [![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 
-一款功能强大的Web应用漏洞自动化扫描工具,支持13种漏洞检测类型,具备异步并发架构和动态插件系统。
+一款功能强大的Web应用漏洞自动化扫描工具，支持13种漏洞检测类型，具备异步并发架构、动态插件系统、全局交叉去重引擎、二次验证机制、AI误报过滤及多目标批量扫描等企业级特性。
 
 ## 特性
 
 - **13种漏洞检测**: 涵盖SQL注入、XSS、CSRF、命令注入、SSRF、XXE等常见Web漏洞
-- **异步并发架构**: 基于aiohttp的高性能异步扫描,支持20+并发协程
+- **异步并发架构**: 基于aiohttp的高性能异步扫描，支持50+并发协程
 - **智能网站爬虫**: 支持JavaScript渲染、API端点发现、表单自动识别
-- **动态插件系统**: 支持自定义检测器插件,灵活扩展检测能力
-- **自动登录支持**: 支持Cookie认证、Bearer Token、表单自动登录
+- **动态插件系统**: 支持自定义检测器插件，灵活扩展检测能力
+- **自动登录支持**: 支持Cookie认证、Bearer Token、表单自动登录、OAuth2
+- **全局交叉去重引擎**: 三层去重（精确/输入点/根因），有效消除跨检测器重复报告
+- **二次验证机制**: 发现可疑漏洞后使用不同payload重新确认，降低误报率
+- **AI误报过滤**: 集成大语言模型分析漏洞上下文，自动识别明显误报（可选）
+- **智能payload生成**: 根据参数类型和上下文动态生成针对性测试用例（可选）
+- **多目标批量扫描**: 支持从文件加载多个目标URL，自动创建任务队列
+- **任务持久化**: 基于SQLite存储扫描任务和漏洞数据，支持断点续传
 - **多格式报告**: 自动生成HTML、JSON、CSV格式的扫描报告
-- **代理支持**: 兼容HTTP/SOCKS代理,可与Burp Suite等工具配合使用
+- **代理支持**: 兼容HTTP/SOCKS代理，可与Burp Suite等工具配合使用
 
 ## 支持的漏洞检测类型
 
@@ -34,6 +40,19 @@
 | 弱密码 | WeakPasswordDetector | 高危 | 常见用户名密码组合、默认凭证 |
 | 开放重定向 | OpenRedirectDetector | 中危 | URL重定向到恶意网站、协议相对URL |
 
+## 架构演进
+
+### v3.0 基础架构
+- 异步并发爬虫 + 13个检测器 + 插件系统 + 自动登录
+
+### v3.1 企业级增强
+| 模块 | 功能 | 说明 |
+|------|------|------|
+| `dedup_engine.py` | 全局交叉去重 | 三层去重（L1精确/L2输入点/L3根因合并），消除跨检测器重复报告 |
+| `verification.py` | 二次验证+上下文理解 | 7种参数类型推断，SQL/XSS/命令注入/目录遍历独立验证策略 |
+| `task_manager.py` | 多目标+任务持久化 | SQLite数据库，批量扫描、任务状态跟踪、断点续传、历史查询 |
+| `ai_analyzer.py` | AI分析引擎 | LLM误报过滤、智能payload生成、修复建议增强（兼容OpenAI/DeepSeek/通义千问） |
+
 ## 安装
 
 ### 环境要求
@@ -50,6 +69,9 @@ cd webjc-3.0
 
 # 安装依赖
 pip install -r requirements.txt
+
+# 安装AI分析依赖（可选，启用AI功能时需要）
+pip install openai
 
 # 验证安装
 python main.py --help
@@ -84,6 +106,43 @@ python main.py -t https://example.com \
   --password 123456
 ```
 
+### 多目标批量扫描
+
+```bash
+# 从文件加载目标URL（每行一个URL）
+python main.py -T targets.txt
+
+# targets.txt 示例：
+# https://site1.com
+# https://site2.com
+# https://site3.com
+```
+
+### 启用AI分析
+
+```bash
+# 使用OpenAI GPT-4
+python main.py -t https://example.com \
+  --enable-ai \
+  --ai-api-key "sk-your-key"
+
+# 使用环境变量（推荐）
+export LLM_API_KEY="sk-your-key"
+python main.py -t https://example.com --enable-ai
+
+# 使用DeepSeek模型
+python main.py -t https://example.com \
+  --enable-ai \
+  --ai-api-base "https://api.deepseek.com/v1" \
+  --ai-model "deepseek-chat"
+
+# 使用通义千问
+python main.py -t https://example.com \
+  --enable-ai \
+  --ai-api-base "https://dashscope.aliyuncs.com/compatible-mode/v1" \
+  --ai-model "qwen-turbo"
+```
+
 ### 高级配置
 
 ```bash
@@ -100,6 +159,9 @@ python main.py -t https://example.com \
 # 禁用爬虫,仅扫描单个URL
 python main.py -t https://example.com/api/v1 --no-crawler
 
+# 禁用去重和验证（快速扫描模式）
+python main.py -t https://example.com --no-dedup --no-verify
+
 # 生成JSON格式报告
 python main.py -t https://example.com --report-format json
 
@@ -107,19 +169,33 @@ python main.py -t https://example.com --report-format json
 python main.py -t https://example.com --verbose
 ```
 
+### 任务管理
+
+```bash
+# 查看所有扫描任务
+python main.py --list-tasks
+
+# 查看任务统计信息
+python main.py --task-stats
+
+# 恢复中断的扫描任务
+python main.py --resume
+```
+
 ## 命令行参数
 
-### 必需参数
+### 目标参数
 
 | 参数 | 简写 | 说明 |
 |-----|------|------|
-| `--target` | `-t` | 扫描目标URL |
+| `--target` | `-t` | 扫描目标URL（单目标） |
+| `--targets` | `-T` | 扫描目标文件路径（多目标，每行一个URL） |
 
 ### 扫描配置
 
 | 参数 | 简写 | 默认值 | 说明 |
 |-----|------|--------|------|
-| `--timeout` | `-T` | 15 | HTTP请求超时时间(秒) |
+| `--timeout` | `-T2` | 15 | HTTP请求超时时间(秒) |
 | `--threads` | `-n` | 10 | 扫描线程数 |
 | `--max-pages` | `-m` | 200 | 爬虫最大爬取页面数 |
 | `--rate-limit` | `-r` | 0.1 | 请求间隔(秒) |
@@ -144,8 +220,22 @@ python main.py -t https://example.com --verbose
 | `--no-crawler` | 禁用爬虫功能,仅扫描目标URL |
 | `--sync` | 使用同步模式 |
 | `--no-async` | 禁用异步模式 |
+| `--no-dedup` | 禁用全局交叉去重 |
+| `--no-verify` | 禁用二次验证 |
+| `--enable-ai` | 启用AI分析(误报过滤+智能payload) |
+| `--ai-api-key` | LLM API密钥 |
+| `--ai-api-base` | LLM API基础URL |
+| `--ai-model` | LLM模型名称(默认gpt-4o-mini) |
 | `--plugin-dir` | 插件目录路径 |
 | `--list-plugins` | 列出所有可用插件 |
+
+### 任务管理
+
+| 参数 | 说明 |
+|-----|------|
+| `--list-tasks` | 列出所有扫描任务 |
+| `--task-stats` | 显示任务统计信息 |
+| `--resume` | 恢复中断的扫描任务 |
 
 ### 输出配置
 
@@ -156,22 +246,40 @@ python main.py -t https://example.com --verbose
 | `--verbose` | `-v` | - | 详细输出模式 |
 | `--quiet` | `-q` | - | 静默模式,仅输出报告路径 |
 
+## 扫描流水线
+
+扫描过程按以下顺序执行：
+
+```
+1. 网站爬取          → 发现URL、表单、参数、API端点
+2. 漏洞扫描          → 13+检测器并发执行
+3. 全局交叉去重      → 三层去重（精确/输入点/根因合并）
+4. 二次验证          → 可疑漏洞重新确认，计算置信度
+5. AI误报过滤        → LLM分析上下文，过滤明显误报（可选）
+6. 报告生成          → HTML/JSON/CSV多格式输出
+```
+
 ## 项目结构
 
 ```
 webjc-3.0/
 ├── main.py                      # 主入口文件
 ├── requirements.txt             # Python依赖
-├── README.md                    # 项目说明
+├── README.md                    # 项目说明(中文)
+├── README_EN.md                 # Project Documentation(English)
 ├── LICENSE                      # MIT许可证
 ├── .gitignore                   # Git忽略配置
 │
 ├── core/                        # 核心模块
-│   ├── config.py                # 配置文件(480行)
-│   ├── scanner.py               # 扫描引擎(414行)
-│   ├── crawler.py               # 网站爬虫(393行)
+│   ├── config.py                # 配置文件
+│   ├── scanner.py               # 扫描引擎(集成去重/验证/AI流水线)
+│   ├── crawler.py               # 网站爬虫
 │   ├── plugin_manager.py        # 插件管理器
 │   ├── session_manager.py       # 会话管理器
+│   ├── dedup_engine.py          # 全局交叉去重引擎(v3.1新增)
+│   ├── verification.py          # 二次验证与上下文理解(v3.1新增)
+│   ├── task_manager.py          # 多目标任务管理器(v3.1新增)
+│   ├── ai_analyzer.py           # AI分析引擎(v3.1新增)
 │   │
 │   ├── detectors/               # 漏洞检测器
 │   │   ├── sqli.py              # SQL注入检测器
@@ -193,8 +301,14 @@ webjc-3.0/
 │       ├── logger.py            # 日志记录器
 │       └── report.py            # 报告生成器
 │
-└── plugins/                     # 用户插件目录
-    └── xxe_detector.py          # XXE检测器示例插件
+├── data/                        # 数据存储(v3.1新增)
+│   └── scan_tasks.db            # SQLite任务数据库
+│
+├── plugins/                     # 用户插件目录
+│   └── xxe_detector.py          # XXE检测器示例插件
+│
+└── tests/                       # 单元测试
+    └── test_new_modules.py      # v3.1新增模块测试
 ```
 
 ## 自定义插件开发
@@ -308,8 +422,8 @@ flake8 .
 # 运行单元测试
 pytest tests/
 
-# 运行集成测试
-pytest tests/integration/
+# 运行v3.1新增模块测试
+python tests/test_new_modules.py
 ```
 
 ### 添加新的检测器
@@ -327,6 +441,7 @@ pytest tests/integration/
 - **速率限制**: 使用 `--rate-limit` 参数控制请求频率,避免对目标造成过大压力
 - **生产环境**: 在生产环境扫描前,请充分测试并评估潜在影响
 - **误报**: 自动扫描工具可能存在误报,建议人工验证发现的漏洞
+- **AI功能**: AI分析为可选功能,未配置API Key时自动降级为规则引擎,不影响基础扫描
 
 ## 许可证
 
@@ -348,6 +463,17 @@ pytest tests/integration/
 - 参与 [Discussions](https://github.com/bmslos/webjc-3.0/discussions)
 
 ## 更新日志
+
+### v3.1 (2026-05-14)
+
+**企业级增强**
+- 新增全局交叉去重引擎（三层去重：精确/输入点/根因合并）
+- 新增二次验证模块（参数类型推断、多策略验证、置信度评分）
+- 新增多目标批量扫描和任务持久化（SQLite数据库、断点续传）
+- 新增AI分析引擎（LLM误报过滤、智能payload生成、修复建议增强）
+- 新增任务管理命令（`--list-tasks`、`--task-stats`、`--resume`）
+- 更新扫描引擎，集成去重/验证/AI后处理流水线
+- 更新主入口，支持多目标文件和AI配置参数
 
 ### v3.0 (2026-04-09)
 

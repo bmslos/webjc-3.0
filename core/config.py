@@ -478,3 +478,45 @@ SCAN_CONFIG = {
     'enable_api_scan': True,  # 是否启用API扫描
     'deep_scan': False,  # 是否启用深度扫描
 }
+
+
+# ==================== 去重引擎配置 ====================
+DEDUP_CONFIG = {
+    'enabled': True,  # 是否启用全局交叉去重
+    'l1_exact_dedup': True,  # L1精确去重开关
+    'l2_input_point_dedup': True,  # L2输入点去重开关
+    'l3_root_cause_merge': True,  # L3根因合并开关
+}
+
+
+# ==================== 二次验证配置 ====================
+VERIFICATION_CONFIG = {
+    'enabled': True,  # 是否启用二次验证
+    'max_verify_per_type': 3,  # 每种漏洞类型最大验证次数
+    'confidence_threshold': 0.3,  # 置信度低于此值的漏洞强制验证
+    'time_verify_delay': 3,  # 时间盲注验证延迟(秒)
+}
+
+
+# ==================== 任务管理配置 ====================
+TASK_CONFIG = {
+    'db_path': 'data/scan_tasks.db',  # SQLite数据库路径
+    'max_concurrent_tasks': 3,  # 最大并发任务数
+    'task_timeout': 3600,  # 单任务超时时间(秒)
+    'auto_resume': True,  # 是否自动恢复中断任务
+}
+
+
+# ==================== AI分析配置 ====================
+AI_CONFIG = {
+    'enabled': False,  # 是否启用AI分析（需配置API Key后开启）
+    'api_key': '',  # LLM API密钥，建议通过环境变量 LLM_API_KEY 注入
+    'api_base': 'https://api.openai.com/v1',  # API基础URL
+    'model': 'gpt-4o-mini',  # 模型名称
+    'max_tokens': 1024,  # 最大生成token数
+    'temperature': 0.1,  # 生成温度（越低越确定）
+    'timeout': 30,  # API调用超时(秒)
+    'filter_false_positives': True,  # 是否启用AI误报过滤
+    'smart_payload_generation': True,  # 是否启用智能payload生成
+    'enhance_recommendation': False,  # 是否增强修复建议（消耗更多token）
+}
