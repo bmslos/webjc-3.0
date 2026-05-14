@@ -288,10 +288,16 @@ class EnhancedWebScanner:
         """
         raw_count = len(self.results['vulnerabilities'])
 
+        if raw_count == 0:
+            self.logger.info("=" * 60)
+            self.logger.info("未发现漏洞, 跳过后处理阶段")
+            self.logger.info("=" * 60)
+            return
+
         # 阶段3: 全局交叉去重
         if self.enable_dedup and self.dedup_engine:
             self.logger.info("=" * 60)
-            self.logger.info("阶段3: 全局交叉去重")
+            self.logger.info(f"阶段3: 全局交叉去重 ({raw_count} 条记录)")
             self.logger.info("=" * 60)
             self.results['vulnerabilities'] = self.dedup_engine.deduplicate(
                 self.results['vulnerabilities']
@@ -301,10 +307,15 @@ class EnhancedWebScanner:
                 f"去重完成: {raw_count} -> {len(self.results['vulnerabilities'])} 条"
             )
 
+        after_dedup = len(self.results['vulnerabilities'])
+        if after_dedup == 0:
+            self.logger.info("去重后无剩余漏洞, 跳过验证和AI分析")
+            return
+
         # 阶段4: 二次验证
         if self.enable_verification and self.verification_engine:
             self.logger.info("=" * 60)
-            self.logger.info("阶段4: 二次验证")
+            self.logger.info(f"阶段4: 二次验证 ({after_dedup} 条记录)")
             self.logger.info("=" * 60)
             self.results['vulnerabilities'] = self.verification_engine.verify_batch(
                 self.results['vulnerabilities']
@@ -322,6 +333,11 @@ class EnhancedWebScanner:
                 self.logger.info(
                     f"验证过滤: 移除 {before_filter - after_filter} 条误报"
                 )
+
+        after_verify = len(self.results['vulnerabilities'])
+        if after_verify == 0:
+            self.logger.info("验证后无剩余漏洞, 跳过AI分析")
+            return
 
         # 阶段5: AI误报过滤
         if self.enable_ai and self.ai_analyzer:
