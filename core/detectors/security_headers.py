@@ -7,10 +7,10 @@
 
 from typing import Dict, List, Optional
 from core.config import VULN_CONFIG
-from core.utils.logger import Logger
+from core.detectors.base import BaseDetector
 
 
-class SecurityHeadersDetector:
+class SecurityHeadersDetector(BaseDetector):
     """安全头检测器"""
     
     def __init__(self, target: str, http, urls: Optional[List] = None,
@@ -26,15 +26,10 @@ class SecurityHeadersDetector:
             forms: 爬虫发现的表单列表
             params: 发现的参数列表
         """
+        super().__init__(target, http, urls=urls, forms=forms, params=params, **kwargs)
         self.name = "安全头检查"
-        self.target = target
-        self.http = http
-        self.urls = urls or [target]
-        self.forms = forms or []
-        self.params = params or []
-        self.logger = Logger()
         
-        config = VULN_CONFIG.get('security_headers', {})
+        config = self._load_vuln_config('security_headers')
         self.required_headers = config.get('required_headers', [])
     
     def scan(self) -> List[Dict]:
@@ -217,17 +212,3 @@ class SecurityHeadersDetector:
             'Pragma': '添加Pragma: no-cache头(HTTP/1.0兼容),确保代理服务器不缓存敏感页面',
         }
         return recommendations.get(header, f'添加{header}头以增强网站安全性')
-    
-    def _deduplicate_vulns(self, vulnerabilities: List[Dict]) -> List[Dict]:
-        """去重漏洞报告"""
-        seen = set()
-        unique_vulns = []
-        
-        for vuln in vulnerabilities:
-            # 对安全头缺失,使用URL+header类型去重
-            key = (vuln['url'], vuln.get('payload', ''), vuln['type'])
-            if key not in seen:
-                seen.add(key)
-                unique_vulns.append(vuln)
-        
-        return unique_vulns

@@ -7,6 +7,8 @@
 
 import time
 import asyncio
+import ssl
+import threading
 from typing import Dict, Optional, Any, Union
 from urllib.parse import urlparse
 
@@ -39,7 +41,8 @@ class HTTPUtils:
         self.rate_limit = rate_limit
         self.last_request_time = 0
         self.logger = Logger()
-        
+        self._rate_lock = threading.Lock()
+
         # 创建Session
         self.session = requests.Session()
         
@@ -70,14 +73,15 @@ class HTTPUtils:
         self.session.mount("https://", adapter)
     
     def _apply_rate_limit(self):
-        """应用请求限速"""
+        """应用请求限速（线程安全）"""
         if self.rate_limit > 0:
-            current_time = time.time()
-            elapsed = current_time - self.last_request_time
-            if elapsed < self.rate_limit:
-                sleep_time = self.rate_limit - elapsed
-                time.sleep(sleep_time)
-            self.last_request_time = time.time()
+            with self._rate_lock:
+                current_time = time.time()
+                elapsed = current_time - self.last_request_time
+                if elapsed < self.rate_limit:
+                    sleep_time = self.rate_limit - elapsed
+                    time.sleep(sleep_time)
+                self.last_request_time = time.time()
     
     def get(self, url: str, headers: Optional[Dict] = None, 
             params: Optional[Dict] = None, allow_redirects: bool = True):
@@ -191,6 +195,14 @@ class HTTPUtils:
         """关闭Session"""
         self.session.close()
 
+    def __enter__(self):
+        """同步上下文管理器入口"""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """同步上下文管理器退出，自动关闭Session"""
+        self.close()
+
 
 class AsyncHTTPUtils:
     """异步HTTP请求工具类 - 支持高并发"""
@@ -214,13 +226,22 @@ class AsyncHTTPUtils:
         self.last_request_time = 0
         self.logger = Logger()
         self.max_retries = max_retries
+        self._rate_lock = asyncio.Lock()
         
         # 配置connector
+        allow_insecure = ASYNC_CONFIG.get('allow_insecure', False)
+        if allow_insecure:
+            # 仅在显式配置时禁用SSL验证（如自签名证书的内网测试）
+            ssl_ctx = False
+        else:
+            # 默认启用SSL证书验证，防止MITM攻击
+            ssl_ctx = ssl.create_default_context()
+
         connector = aiohttp.TCPConnector(
             limit=ASYNC_CONFIG['connection_pool_size'],
             limit_per_host=ASYNC_CONFIG['max_conn_per_host'],
             enable_cleanup_closed=True,
-            ssl=False
+            ssl=ssl_ctx
         )
         
         # 配置默认headers
@@ -249,14 +270,15 @@ class AsyncHTTPUtils:
         )
     
     async def _apply_rate_limit(self):
-        """应用请求限速"""
+        """应用请求限速（协程安全）"""
         if self.rate_limit > 0:
-            current_time = time.time()
-            elapsed = current_time - self.last_request_time
-            if elapsed < self.rate_limit:
-                sleep_time = self.rate_limit - elapsed
-                await asyncio.sleep(sleep_time)
-            self.last_request_time = time.time()
+            async with self._rate_lock:
+                current_time = time.time()
+                elapsed = current_time - self.last_request_time
+                if elapsed < self.rate_limit:
+                    sleep_time = self.rate_limit - elapsed
+                    await asyncio.sleep(sleep_time)
+                self.last_request_time = time.time()
     
     async def _request_with_retry(self, method: str, url: str, **kwargs) -> Optional[aiohttp.ClientResponse]:
         """带重试的请求"""
@@ -327,3 +349,11 @@ class AsyncHTTPUtils:
         """关闭Session"""
         if self.session and not self.session.closed:
             await self.session.close()
+
+    async def __aenter__(self):
+        """异步上下文管理器入口"""
+        return self
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        """异步上下文管理器退出，自动关闭Session"""
+        await self.close()

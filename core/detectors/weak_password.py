@@ -8,10 +8,10 @@
 import re
 from typing import Dict, List, Optional
 from core.config import VULN_CONFIG
-from core.utils.logger import Logger
+from core.detectors.base import BaseDetector
 
 
-class WeakPasswordDetector:
+class WeakPasswordDetector(BaseDetector):
     """弱密码检测器"""
     
     def __init__(self, target: str, http, urls: Optional[List] = None,
@@ -27,15 +27,10 @@ class WeakPasswordDetector:
             forms: 爬虫发现的表单列表
             params: 发现的参数列表
         """
+        super().__init__(target, http, urls=urls, forms=forms, params=params, **kwargs)
         self.name = "弱密码"
-        self.target = target
-        self.http = http
-        self.urls = urls or [target]
-        self.forms = forms or []
-        self.params = params or []
-        self.logger = Logger()
         
-        config = VULN_CONFIG.get('weak_password', {})
+        config = self._load_vuln_config('weak_password')
         self.common_passwords = config.get('common_passwords', [
             'admin', 'password', '123456', '12345678',
             'admin123', 'root', 'test', 'guest'
@@ -232,17 +227,3 @@ class WeakPasswordDetector:
                     return True
         
         return False
-    
-    def _deduplicate_vulns(self, vulnerabilities: List[Dict]) -> List[Dict]:
-        """去重漏洞报告"""
-        seen = set()
-        unique_vulns = []
-        
-        for vuln in vulnerabilities:
-            # 使用URL去重
-            key = vuln['url']
-            if key not in seen:
-                seen.add(key)
-                unique_vulns.append(vuln)
-        
-        return unique_vulns

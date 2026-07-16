@@ -55,6 +55,38 @@
 | `task_manager.py` | 多目标+任务持久化 | SQLite数据库，批量扫描、任务状态跟踪、断点续传、历史查询 |
 | `ai_analyzer.py` | AI分析引擎 | LLM误报过滤、智能payload生成、修复建议增强（兼容OpenAI/DeepSeek/通义千问） |
 
+### v3.1.1 安全加固与质量优化
+
+对 v3.1 进行了全面的代码审计和四阶段改进，共 22 项优化：
+
+**安全修复（高危）**
+- 修复 HTML 报告存储型 XSS（改用 Jinja2 autoescape 自动转义）
+- 恢复异步 HTTP SSL 证书验证（原 `ssl=False` 全局禁用）
+- 升级存在已知 CVE 的依赖（requests/aiohttp/Jinja2/urllib3）
+- 防御 LLM 提示词注入（字段截断 + 防御指令 + 数据分隔符隔离）
+- 收紧插件加载白名单（仅接受 Detector/Scanner 后缀类）
+
+**架构优化**
+- 提取 `BaseDetector(ABC)` 抽象基类，统一 13 个检测器的 `__init__`/`_deduplicate_vulns`/`_build_vuln`，消除约 600 行重复代码
+- 修复 Logger 单例 `__new__` 签名崩溃，新增 `set_verbose()` 运行时切换日志级别
+- 修复异步函数内同步 HTTP 调用阻塞事件循环（新增 `_async_get()` 兼容方法）
+- 删除死代码 `session_manager.py`（从未被引用）
+- 补充 `__init__.py` 包文件，规范化包结构
+
+**质量提升**
+- 新增 26 个单元测试（BaseDetector/Logger/XSS转义），配置 pytest.ini 和 conftest.py
+- 修复 3 处静默吞异常（`except Exception: pass` → 带日志记录）
+- main.py 中 5 处 print 改为 logging
+- 用 Jinja2 模板重写报告生成器，将 285 行 f-string 拼接拆分为模板渲染
+- HTTP 工具添加上下文管理器（`__enter__/__exit__` + `__aenter__/__aexit__`）
+
+**性能优化**
+- LLM 分析结果缓存（避免对相同漏洞重复调用）
+- TaskManager 逐条 INSERT 改为 `executemany` 批量插入
+- 爬虫 URL 队列改用 `deque(maxlen=2000)`，`pop(0)` 改为 `popleft()`（O(1)）
+- 限速器添加 `threading.Lock`/`asyncio.Lock` 保证线程/协程安全
+- 检测器中多次访问的 `response.text` 缓存到局部变量
+
 ## 安装
 
 ### 环境要求
@@ -197,7 +229,7 @@ python main.py --resume
 
 | 参数 | 简写 | 默认值 | 说明 |
 |-----|------|--------|------|
-| `--timeout` | `-T2` | 15 | HTTP请求超时时间(秒) |
+| `--timeout` | - | 15 | HTTP请求超时时间(秒) |
 | `--threads` | `-n` | 10 | 扫描线程数 |
 | `--max-pages` | `-m` | 200 | 爬虫最大爬取页面数 |
 | `--rate-limit` | `-r` | 0.1 | 请求间隔(秒) |
@@ -277,13 +309,14 @@ webjc-3.0/
 │   ├── scanner.py               # 扫描引擎(集成去重/验证/AI流水线)
 │   ├── crawler.py               # 网站爬虫
 │   ├── plugin_manager.py        # 插件管理器
-│   ├── session_manager.py       # 会话管理器
 │   ├── dedup_engine.py          # 全局交叉去重引擎(v3.1新增)
 │   ├── verification.py          # 二次验证与上下文理解(v3.1新增)
 │   ├── task_manager.py          # 多目标任务管理器(v3.1新增)
 │   ├── ai_analyzer.py           # AI分析引擎(v3.1新增)
 │   │
 │   ├── detectors/               # 漏洞检测器
+│   │   ├── __init__.py          # 包初始化
+│   │   ├── base.py              # 检测器抽象基类(v3.1.1新增)
 │   │   ├── sqli.py              # SQL注入检测器
 │   │   ├── xss.py               # XSS跨站脚本检测器
 │   │   ├── csrf.py              # CSRF检测器
@@ -299,6 +332,7 @@ webjc-3.0/
 │   │   └── open_redirect.py     # 开放重定向检测器
 │   │
 │   └── utils/                   # 工具模块
+│       ├── __init__.py          # 包初始化
 │       ├── http.py              # HTTP客户端(同步/异步)
 │       ├── logger.py            # 日志记录器
 │       └── report.py            # 报告生成器
@@ -307,10 +341,18 @@ webjc-3.0/
 │   └── scan_tasks.db            # SQLite任务数据库
 │
 ├── plugins/                     # 用户插件目录
-│   └── xxe_detector.py          # XXE检测器示例插件
+│   ├── __init__.py              # 包初始化
+│   └── xxe_detector.py          # XXE检测器示例插件(薄封装,复用内置检测器)
+│
+├── pytest.ini                   # pytest配置(v3.1.1新增)
 │
 └── tests/                       # 单元测试
-    └── test_new_modules.py      # v3.1新增模块测试
+    ├── __init__.py              # 包初始化
+    ├── conftest.py              # pytest公共fixtures(v3.1.1新增)
+    ├── test_new_modules.py      # v3.1新增模块测试
+    ├── test_base_detector.py    # BaseDetector单元测试(v3.1.1新增)
+    ├── test_logger.py           # Logger单元测试(v3.1.1新增)
+    └── test_report.py           # 报告XSS转义测试(v3.1.1新增)
 ```
 
 ## 自定义插件开发
@@ -321,42 +363,39 @@ webjc-3.0/
 
 ```python
 # plugins/my_detector.py
-from typing import Dict, List, Optional
-from core.utils.logger import Logger
+from typing import Dict, List
+from core.detectors.base import BaseDetector
 
 
-class MyDetector:
+class MyDetector(BaseDetector):
     """自定义检测器示例"""
-    
+
     def __init__(self, target: str, http, urls=None, forms=None, **kwargs):
+        super().__init__(target, http, urls=urls, forms=forms, **kwargs)
         self.name = "我的检测器"
-        self.target = target
-        self.http = http
-        self.urls = urls or [target]
-        self.forms = forms or []
-        self.logger = Logger()
-    
+
     def scan(self) -> List[Dict]:
-        """执行扫描,返回漏洞列表"""
+        """执行扫描,返回漏洞列表（基类自动提供去重和漏洞构造方法）"""
         vulnerabilities = []
-        
+
         # 你的检测逻辑
         for url in self.urls:
             response = self.http.get(url)
             if self._check_vulnerability(response):
-                vulnerabilities.append({
-                    'type': '漏洞类型',
-                    'severity': '严重程度',  # 严重/高危/中危/低危/信息
-                    'url': url,
-                    'parameter': '参数名',
-                    'method': 'GET',
-                    'payload': '使用的payload',
-                    'description': '漏洞描述',
-                    'recommendation': '修复建议'
-                })
-        
-        return vulnerabilities
-    
+                # 使用基类的 _build_vuln 构造标准漏洞字典
+                vulnerabilities.append(self._build_vuln(
+                    vuln_type='漏洞类型',
+                    severity='高危',  # 严重/高危/中危/低危/信息
+                    url=url,
+                    parameter='参数名',
+                    payload='使用的payload',
+                    description='漏洞描述',
+                    recommendation='修复建议'
+                ))
+
+        # 基类的 _deduplicate_vulns 自动去重
+        return self._deduplicate_vulns(vulnerabilities)
+
     def _check_vulnerability(self, response) -> bool:
         """检查是否存在漏洞"""
         # 实现你的检测逻辑
@@ -421,21 +460,21 @@ flake8 .
 ### 运行测试
 
 ```bash
-# 运行单元测试
-pytest tests/
+# 运行所有单元测试
+pytest
 
-# 运行v3.1新增模块测试
-python tests/test_new_modules.py
+# 运行特定测试文件
+pytest tests/test_base_detector.py -v
 ```
 
 ### 添加新的检测器
 
 1. 在 `core/detectors/` 下创建新文件
-2. 实现检测器类,遵循标准接口
+2. 继承 `BaseDetector` 基类，实现 `scan()` 方法（自动获得去重和漏洞构造能力）
 3. 在 `core/config.py` 的 `VULN_CONFIG` 中添加配置
 4. 在 `core/scanner.py` 的 `detector_mapping` 中注册
 
-参考 `core/detectors/sqli.py` 作为模板。
+参考 `core/detectors/base.py` 了解基类接口，`core/detectors/sqli.py` 作为完整示例。
 
 ## 注意事项
 
@@ -465,6 +504,36 @@ python tests/test_new_modules.py
 - 参与 [Discussions](https://github.com/bmslos/webjc-3.0/discussions)
 
 ## 更新日志
+
+### v3.1.1 (2026-07-16)
+
+**安全加固与质量优化（22 项改进）**
+
+安全修复：
+- 修复 HTML 报告存储型 XSS（改用 Jinja2 autoescape 自动转义）
+- 恢复异步 HTTP SSL 证书验证（原 `ssl=False` 全局禁用）
+- 升级存在已知 CVE 的依赖（requests/aiohttp/Jinja2/urllib3）
+- 防御 LLM 提示词注入（字段截断 + 防御指令 + 数据分隔符隔离）
+- 收紧插件加载白名单（仅接受 Detector/Scanner 后缀类）
+
+架构优化：
+- 提取 `BaseDetector(ABC)` 抽象基类，消除 13 个检测器中约 600 行重复代码
+- 修复 Logger 单例 `__new__` 签名崩溃，新增 `set_verbose()` 方法
+- 修复异步函数内同步 HTTP 调用阻塞事件循环
+- 删除死代码 `session_manager.py`，移除冗余依赖 `asyncio-mqtt`
+- 补充 `__init__.py` 包文件，规范化包结构
+
+质量提升：
+- 新增 26 个单元测试，配置 pytest.ini 和 conftest.py
+- 修复 3 处静默吞异常，main.py 5 处 print 改为 logging
+- 用 Jinja2 模板重写报告生成器，拆分 285 行长函数
+- HTTP 工具添加上下文管理器（`__enter__/__exit__` + `__aenter__/__aexit__`）
+
+性能优化：
+- LLM 分析结果缓存，避免重复调用
+- TaskManager 批量 INSERT（`executemany`）
+- 爬虫 URL 队列改用 `deque(maxlen=2000)`，`pop(0)` 改为 `popleft()`（O(1)）
+- 限速器添加线程/协程安全锁
 
 ### v3.1 (2026-05-14)
 

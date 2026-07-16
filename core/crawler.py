@@ -8,6 +8,7 @@
 import re
 import json
 import asyncio
+from collections import deque
 from typing import Dict, List, Set, Optional, Tuple, Any
 from urllib.parse import urljoin, urlparse, urldefrag, parse_qs
 from bs4 import BeautifulSoup
@@ -40,7 +41,9 @@ class EnhancedWebCrawler:
         self.logger = Logger()
         
         self.visited_urls: Set[str] = set()
-        self.urls_to_visit: List[str] = [target]
+        self.urls_to_visit: deque = deque(
+            [target], maxlen=CRAWLER_CONFIG.get('max_url_queue', 2000)
+        )
         self.discovered_urls: List[str] = []
         self.discovered_forms: List[Dict] = []
         self.discovered_params: Set[str] = set()
@@ -76,7 +79,7 @@ class EnhancedWebCrawler:
         pages_crawled = 0
         
         while self.urls_to_visit and pages_crawled < self.max_pages:
-            current_url = self.urls_to_visit.pop(0)
+            current_url = self.urls_to_visit.popleft()
             
             if current_url in self.visited_urls:
                 continue
@@ -110,13 +113,24 @@ class EnhancedWebCrawler:
             'api_endpoints': self.discovered_api_endpoints,
             'inputs': self.discovered_inputs
         }
-    
+
+    async def _async_get(self, url: str):
+        """
+        异步获取页面，兼容同步和异步HTTP工具
+
+        当 http_utils 为 AsyncHTTPUtils 时直接 await；
+        为同步 HTTPUtils 时通过 asyncio.to_thread 避免阻塞事件循环。
+        """
+        if isinstance(self.http, AsyncHTTPUtils):
+            return await self.http.get(url)
+        return await asyncio.to_thread(self.http.get, url)
+
     async def _crawl_static(self, url: str):
         """爬取静态页面"""
-        response = self.http.get(url)
+        response = await self._async_get(url)
         if not response or response.status_code != 200:
             return
-        
+
         await self._parse_page(response.text, url)
     
     async def _crawl_with_playwright(self, url: str):
@@ -325,7 +339,7 @@ class EnhancedWebCrawler:
             base_url = f"{urlparse(self.target).scheme}://{urlparse(self.target).netloc}"
             robots_url = urljoin(base_url, '/robots.txt')
             
-            response = self.http.get(robots_url)
+            response = await self._async_get(robots_url)
             if response and response.status_code == 200:
                 lines = response.text.split('\n')
                 for line in lines:
@@ -352,7 +366,7 @@ class EnhancedWebCrawler:
             base_url = f"{urlparse(self.target).scheme}://{urlparse(self.target).netloc}"
             sitemap_url = urljoin(base_url, '/sitemap.xml')
             
-            response = self.http.get(sitemap_url)
+            response = await self._async_get(sitemap_url)
             if response and response.status_code == 200:
                 # 提取URL
                 urls = re.findall(r'<loc>(.*?)</loc>', response.text)

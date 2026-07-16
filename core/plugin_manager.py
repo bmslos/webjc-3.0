@@ -77,6 +77,11 @@ class PluginManager:
         package_path = os.path.join(self.plugin_dir, plugin_name)
         
         try:
+            # 安全告警：插件为可信代码，exec_module 将执行任意 Python 代码
+            self.logger.info(
+                f"正在加载插件 {plugin_name}（来源: {plugin_path}）- "
+                "插件代码将被执行，请确保来源可信"
+            )
             if os.path.exists(plugin_path):
                 # 加载单个Python文件
                 spec = importlib.util.spec_from_file_location(
@@ -187,27 +192,28 @@ class PluginManager:
     def _find_plugin_class(self, module, plugin_name: str) -> Optional[Type]:
         """
         在模块中查找插件类
-        
+
+        安全策略：仅接受以 Detector 或 Scanner 结尾的类，
+        拒绝任意公开类的 fallback 加载，防止恶意插件注入。
+
         Args:
             module: Python模块
             plugin_name: 插件名称
-            
+
         Returns:
             插件类
         """
-        # 优先查找以Detector/Scanner/Plugin结尾的类
+        # 仅查找以Detector/Scanner结尾的类（收紧白名单）
         for attr_name in dir(module):
             attr = getattr(module, attr_name)
             if isinstance(attr, type):
-                # 检查类名是否匹配插件名称
-                if (attr_name.lower().endswith(('detector', 'scanner', 'plugin')) and
+                # 检查类名是否匹配插件名称且以安全后缀结尾
+                if (attr_name.lower().endswith(('detector', 'scanner')) and
                     plugin_name.lower() in attr_name.lower()):
                     return attr
-        
-        # 如果没找到,返回第一个公开的类
-        for attr_name in dir(module):
-            attr = getattr(module, attr_name)
-            if isinstance(attr, type) and not attr_name.startswith('_'):
-                return attr
-        
+
+        self.logger.warning(
+            f"插件 {plugin_name} 中未找到有效的检测器类"
+            f"（仅接受以 Detector/Scanner 结尾的类）"
+        )
         return None

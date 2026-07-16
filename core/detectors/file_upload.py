@@ -8,10 +8,10 @@
 import os
 from typing import Dict, List, Optional
 from core.config import VULN_CONFIG
-from core.utils.logger import Logger
+from core.detectors.base import BaseDetector
 
 
-class FileUploadDetector:
+class FileUploadDetector(BaseDetector):
     """文件上传检测器"""
     
     def __init__(self, target: str, http, urls: Optional[List] = None,
@@ -27,15 +27,10 @@ class FileUploadDetector:
             forms: 爬虫发现的表单列表
             params: 发现的参数列表
         """
+        super().__init__(target, http, urls=urls, forms=forms, params=params, **kwargs)
         self.name = "文件上传漏洞"
-        self.target = target
-        self.http = http
-        self.urls = urls or [target]
-        self.forms = forms or []
-        self.params = params or []
-        self.logger = Logger()
         
-        config = VULN_CONFIG.get('file_upload', {})
+        config = self._load_vuln_config('file_upload')
         self.malicious_files = config.get('malicious_files', [
             {'name': 'shell.php', 'content': '<?php echo "test"; ?>', 'mime': 'application/x-php'},
             {'name': 'shell.html', 'content': '<script>document.write("test")</script>', 'mime': 'text/html'},
@@ -285,17 +280,3 @@ class FileUploadDetector:
         from urllib.parse import urlparse
         parsed = urlparse(self.target)
         return f'{parsed.scheme}://{parsed.netloc}'
-    
-    def _deduplicate_vulns(self, vulnerabilities: List[Dict]) -> List[Dict]:
-        """去重漏洞报告"""
-        seen = set()
-        unique_vulns = []
-        
-        for vuln in vulnerabilities:
-            # 使用URL+类型去重
-            key = (vuln['url'], vuln['type'])
-            if key not in seen:
-                seen.add(key)
-                unique_vulns.append(vuln)
-        
-        return unique_vulns

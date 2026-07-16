@@ -9,10 +9,10 @@ import re
 from typing import Dict, List, Optional, Tuple
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from core.config import VULN_CONFIG
-from core.utils.logger import Logger
+from core.detectors.base import BaseDetector
 
 
-class XSSDetector:
+class XSSDetector(BaseDetector):
     """XSS跨站脚本检测器"""
     
     def __init__(self, target: str, http, urls: Optional[List] = None,
@@ -28,15 +28,10 @@ class XSSDetector:
             forms: 爬虫发现的表单列表
             params: 发现的参数列表
         """
+        super().__init__(target, http, urls=urls, forms=forms, params=params, **kwargs)
         self.name = "XSS跨站脚本"
-        self.target = target
-        self.http = http
-        self.urls = urls or [target]
-        self.forms = forms or []
-        self.params = params or []
-        self.logger = Logger()
         
-        config = VULN_CONFIG.get('xss', {})
+        config = self._load_vuln_config('xss')
         self.payloads = config.get('payloads', [
             '<script>alert("XSS")</script>',
             '<img src=x onerror=alert("XSS")>',
@@ -118,10 +113,12 @@ class XSSDetector:
                 response = self.http.get(test_url)
                 
                 if response and response.status_code == 200:
+                    # 缓存 response.text 避免重复解码
+                    body = response.text
                     # 检查payload是否被反射
-                    if self._check_reflection(response.text, payload):
+                    if self._check_reflection(body, payload):
                         # 分析上下文
-                        context = self._analyze_context(response.text, payload)
+                        context = self._analyze_context(body, payload)
                         
                         vulnerabilities.append({
                             'type': 'XSS(反射型)',
@@ -160,8 +157,9 @@ class XSSDetector:
                 response = self.http.post(form_action, data=post_data)
                 
                 if response and response.status_code == 200:
-                    if self._check_reflection(response.text, payload):
-                        context = self._analyze_context(response.text, payload)
+                    body = response.text
+                    if self._check_reflection(body, payload):
+                        context = self._analyze_context(body, payload)
                         
                         vulnerabilities.append({
                             'type': 'XSS(反射型)',
@@ -287,16 +285,3 @@ class XSSDetector:
         has_sink = any(re.search(pattern, html_content) for pattern in dangerous_sinks)
         
         return has_source and has_sink
-    
-    def _deduplicate_vulns(self, vulnerabilities: List[Dict]) -> List[Dict]:
-        """去重漏洞报告"""
-        seen = set()
-        unique_vulns = []
-        
-        for vuln in vulnerabilities:
-            key = (vuln['url'], vuln.get('parameter', ''), vuln['type'])
-            if key not in seen:
-                seen.add(key)
-                unique_vulns.append(vuln)
-        
-        return unique_vulns

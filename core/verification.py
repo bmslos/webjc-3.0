@@ -296,7 +296,8 @@ class VerificationEngine:
             params = parse_qs(parsed.query)
             values = params.get(param_name, [])
             return values[0] if values else ''
-        except Exception:
+        except Exception as e:
+            self.logger.debug(f"获取参数值失败: {url}, 参数: {param_name}, 错误: {e}")
             return ''
 
     def _get_baseline_response(self, url: str, param_name: str) -> Optional[object]:
@@ -330,7 +331,8 @@ class VerificationEngine:
             ))
 
             return self.http.get(baseline_url)
-        except Exception:
+        except Exception as e:
+            self.logger.debug(f"获取基线响应失败: {url}, 参数: {param_name}, 错误: {e}")
             return None
 
     def _verify_sqli(self, vuln: Dict) -> Dict:
@@ -690,7 +692,8 @@ class VerificationEngine:
                 parsed.scheme, parsed.netloc, parsed.path,
                 parsed.params, new_query, parsed.fragment
             ))
-        except Exception:
+        except Exception as e:
+            self.logger.debug(f"URL参数替换失败: {url}, 错误: {e}")
             return url
 
     def get_stats(self) -> Dict:

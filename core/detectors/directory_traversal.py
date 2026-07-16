@@ -9,10 +9,10 @@ import re
 from typing import Dict, List, Optional
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from core.config import VULN_CONFIG
-from core.utils.logger import Logger
+from core.detectors.base import BaseDetector
 
 
-class DirectoryTraversalDetector:
+class DirectoryTraversalDetector(BaseDetector):
     """目录遍历检测器"""
     
     def __init__(self, target: str, http, urls: Optional[List] = None,
@@ -28,15 +28,10 @@ class DirectoryTraversalDetector:
             forms: 爬虫发现的表单列表
             params: 发现的参数列表
         """
+        super().__init__(target, http, urls=urls, forms=forms, params=params, **kwargs)
         self.name = "目录遍历"
-        self.target = target
-        self.http = http
-        self.urls = urls or [target]
-        self.forms = forms or []
-        self.params = params or []
-        self.logger = Logger()
         
-        config = VULN_CONFIG.get('directory_traversal', {})
+        config = self._load_vuln_config('directory_traversal')
         self.payloads = config.get('payloads', ['../', '../../', '../../../'])
         self.test_files = config.get('test_files', ['etc/passwd', 'windows/win.ini'])
         
@@ -203,16 +198,3 @@ class DirectoryTraversalDetector:
                 return True
         
         return False
-    
-    def _deduplicate_vulns(self, vulnerabilities: List[Dict]) -> List[Dict]:
-        """去重漏洞报告"""
-        seen = set()
-        unique_vulns = []
-        
-        for vuln in vulnerabilities:
-            key = (vuln['url'], vuln.get('parameter', ''), vuln['type'])
-            if key not in seen:
-                seen.add(key)
-                unique_vulns.append(vuln)
-        
-        return unique_vulns

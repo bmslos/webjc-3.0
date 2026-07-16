@@ -67,7 +67,7 @@ def parse_args():
     )
 
     # 扫描配置
-    parser.add_argument('--timeout', '-T2', type=int, default=15, help='HTTP请求超时时间(秒),默认15')
+    parser.add_argument('--timeout', type=int, default=15, help='HTTP请求超时时间(秒),默认15')
     parser.add_argument('--threads', '-n', type=int, default=10, help='扫描线程数,默认10')
     parser.add_argument('--max-pages', '-m', type=int, default=200, help='爬虫最大爬取页面数,默认200')
     parser.add_argument('--rate-limit', '-r', type=float, default=0.1, help='请求间隔(秒),默认0.1')
@@ -282,13 +282,30 @@ def main():
         import logging
         logger.logger.setLevel(logging.WARNING)
 
+    # 列出所有可用插件
+    if args.list_plugins:
+        from core.plugin_manager import PluginManager
+        plugin_dir = args.plugin_dir or 'plugins'
+        pm = PluginManager(plugin_dir)
+        pm.load_all_plugins()
+        plugins = pm.get_all_plugins()
+        if not plugins:
+            print(f"未在 {plugin_dir} 目录中找到可用插件")
+        else:
+            print(f"可用插件 (共 {len(plugins)} 个):")
+            print("-" * 60)
+            for name, cls in plugins.items():
+                doc = (cls.__doc__ or '').strip().split('\n')[0]
+                print(f"  {name:<30} {doc}")
+        return
+
     task_manager = TaskManager()
 
     # 任务管理命令
     if args.list_tasks:
         tasks = task_manager.list_tasks()
         if not tasks:
-            print("暂无扫描任务")
+            logger.info("暂无扫描任务")
             return
         print(f"{'任务ID':<30} {'目标URL':<40} {'状态':<10} {'漏洞数':<8} {'创建时间':<20}")
         print("-" * 110)
@@ -314,7 +331,7 @@ def main():
     if args.resume:
         interrupted = task_manager.get_interrupted_tasks()
         if not interrupted:
-            print("没有可恢复的中断任务")
+            logger.info("没有可恢复的中断任务")
             return
         print(f"发现 {len(interrupted)} 个可恢复任务:")
         for task in interrupted:
@@ -326,7 +343,7 @@ def main():
 
     # 检查目标参数
     if not args.target and not args.targets:
-        print("错误: 请指定扫描目标 (--target 或 --targets)")
+        logger.warning("错误: 请指定扫描目标 (--target 或 --targets)")
         sys.exit(1)
 
     # 显示扫描配置
@@ -359,12 +376,12 @@ def main():
     # 多目标批量扫描
     elif args.targets:
         if not os.path.exists(args.targets):
-            print(f"错误: 目标文件不存在: {args.targets}")
+            logger.warning(f"错误: 目标文件不存在: {args.targets}")
             sys.exit(1)
 
         task_ids = task_manager.load_targets_from_file(args.targets)
         if not task_ids:
-            print("错误: 未找到有效的目标URL")
+            logger.warning("错误: 未找到有效的目标URL")
             sys.exit(1)
 
         logger.info(f"批量扫描: 共 {len(task_ids)} 个目标")

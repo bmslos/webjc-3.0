@@ -58,6 +58,14 @@ class TaskManager:
 
         self._init_database()
 
+    def __enter__(self):
+        """上下文管理器入口，支持 with TaskManager() as tm 用法"""
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        """上下文管理器退出（每次方法调用创建新连接，无需在此关闭）"""
+        pass
+
     def _init_database(self):
         """
         初始化数据库表结构
@@ -306,18 +314,9 @@ class TaskManager:
                 task_id,
             ))
 
-            for vuln in vulnerabilities:
-                param_context_json = json.dumps(
-                    vuln.get('param_context', {}), ensure_ascii=False
-                )
-                cursor.execute('''
-                    INSERT INTO vulnerabilities
-                    (task_id, vuln_type, severity, url, parameter, method,
-                     payload, description, recommendation,
-                     verification_status, confidence, param_context_json,
-                     created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                ''', (
+            now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            vuln_rows = [
+                (
                     task_id,
                     vuln.get('type', ''),
                     vuln.get('severity', ''),
@@ -329,9 +328,19 @@ class TaskManager:
                     vuln.get('recommendation', ''),
                     vuln.get('verification_status', ''),
                     vuln.get('confidence', 0.0),
-                    param_context_json,
-                    datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-                ))
+                    json.dumps(vuln.get('param_context', {}), ensure_ascii=False),
+                    now,
+                )
+                for vuln in vulnerabilities
+            ]
+            cursor.executemany('''
+                INSERT INTO vulnerabilities
+                (task_id, vuln_type, severity, url, parameter, method,
+                 payload, description, recommendation,
+                 verification_status, confidence, param_context_json,
+                 created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', vuln_rows)
 
             conn.commit()
             conn.close()

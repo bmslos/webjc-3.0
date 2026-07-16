@@ -7,10 +7,10 @@ CSRF跨站请求伪造检测器 - 检测表单和API端点是否缺少CSRF保护
 
 from typing import Dict, List, Optional
 from core.config import VULN_CONFIG
-from core.utils.logger import Logger
+from core.detectors.base import BaseDetector
 
 
-class CSRFDetector:
+class CSRFDetector(BaseDetector):
     """CSRF跨站请求伪造检测器"""
     
     def __init__(self, target: str, http, urls: Optional[List] = None,
@@ -27,16 +27,11 @@ class CSRFDetector:
             params: 发现的参数列表
             api_endpoints: API端点列表
         """
+        super().__init__(target, http, urls=urls, forms=forms, params=params,
+                         api_endpoints=api_endpoints, **kwargs)
         self.name = "CSRF(跨站请求伪造)"
-        self.target = target
-        self.http = http
-        self.urls = urls or [target]
-        self.forms = forms or []
-        self.params = params or []
-        self.api_endpoints = api_endpoints or []
-        self.logger = Logger()
         
-        config = VULN_CONFIG.get('csrf', {})
+        config = self._load_vuln_config('csrf')
         self.token_patterns = config.get('token_patterns', [
             'csrf', 'token', '_token', 'authenticity_token',
             'csrfmiddlewaretoken', 'xsrf', '_xsrf', 'csrf_token'
@@ -128,17 +123,3 @@ class CSRFDetector:
                     })
         
         return vulnerabilities
-    
-    def _deduplicate_vulns(self, vulnerabilities: List[Dict]) -> List[Dict]:
-        """去重漏洞报告"""
-        seen = set()
-        unique_vulns = []
-        
-        for vuln in vulnerabilities:
-            # 使用URL+类型去重
-            key = (vuln['url'], vuln['type'])
-            if key not in seen:
-                seen.add(key)
-                unique_vulns.append(vuln)
-        
-        return unique_vulns

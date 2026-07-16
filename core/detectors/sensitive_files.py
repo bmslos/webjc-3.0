@@ -9,10 +9,10 @@ import re
 from typing import Dict, List, Optional
 from urllib.parse import urljoin, urlparse
 from core.config import VULN_CONFIG
-from core.utils.logger import Logger
+from core.detectors.base import BaseDetector
 
 
-class SensitiveFilesDetector:
+class SensitiveFilesDetector(BaseDetector):
     """敏感文件检测器"""
     
     def __init__(self, target: str, http, urls: Optional[List] = None,
@@ -28,15 +28,10 @@ class SensitiveFilesDetector:
             forms: 爬虫发现的表单列表
             params: 发现的参数列表
         """
+        super().__init__(target, http, urls=urls, forms=forms, params=params, **kwargs)
         self.name = "敏感文件泄露"
-        self.target = target
-        self.http = http
-        self.urls = urls or [target]
-        self.forms = forms or []
-        self.params = params or []
-        self.logger = Logger()
         
-        config = VULN_CONFIG.get('sensitive_files', {})
+        config = self._load_vuln_config('sensitive_files')
         self.sensitive_files = config.get('files', [])
         
         # 文件特征匹配规则
@@ -126,15 +121,16 @@ class SensitiveFilesDetector:
     
     def _is_valid_content(self, response) -> bool:
         """检查响应是否为有效内容(非404页面或空页面)"""
-        if not response.text:
+        body = response.text
+        if not body:
             return False
-        
+
         # 检查响应长度
-        if len(response.text) < 50:
+        if len(body) < 50:
             return False
-        
+
         # 检查常见的404页面特征
-        text_lower = response.text.lower()
+        text_lower = body.lower()
         if any(keyword in text_lower for keyword in ['404 not found', 'page not found', 'not found']):
             # 进一步检查HTTP状态码
             if response.status_code == 404:
@@ -177,18 +173,19 @@ class SensitiveFilesDetector:
     def _get_description(self, file_path: str, response) -> str:
         """生成描述信息"""
         file_lower = file_path.lower()
-        
+        body = response.text
+
         # 检测可能泄露的内容类型
         content_types = []
-        if any(pattern in response.text for pattern in ['password', 'passwd', 'secret', 'key']):
+        if any(pattern in body for pattern in ['password', 'passwd', 'secret', 'key']):
             content_types.append('密码或密钥')
-        if any(pattern in response.text for pattern in ['CREATE TABLE', 'INSERT INTO', 'SELECT']):
+        if any(pattern in body for pattern in ['CREATE TABLE', 'INSERT INTO', 'SELECT']):
             content_types.append('数据库信息')
-        if any(pattern in response.text for pattern in ['api_key', 'token', 'authorization']):
+        if any(pattern in body for pattern in ['api_key', 'token', 'authorization']):
             content_types.append('API凭证')
-        if any(pattern in response.text for pattern in ['user', 'email', 'username']):
+        if any(pattern in body for pattern in ['user', 'email', 'username']):
             content_types.append('用户信息')
-        if any(pattern in response.text for pattern in ['PHP Version', 'Server API', 'Configuration']):
+        if any(pattern in body for pattern in ['PHP Version', 'Server API', 'Configuration']):
             content_types.append('服务器配置')
         
         if content_types:
@@ -211,17 +208,3 @@ class SensitiveFilesDetector:
             return '将配置文件移到Web根目录外。设置正确的文件权限。使用环境变量存储敏感配置。禁止直接访问配置文件'
         else:
             return '删除或限制访问敏感文件。配置Web服务器拒绝访问隐藏文件和敏感文件。使用访问控制列表。定期审计Web目录中的敏感文件'
-    
-    def _deduplicate_vulns(self, vulnerabilities: List[Dict]) -> List[Dict]:
-        """去重漏洞报告"""
-        seen = set()
-        unique_vulns = []
-        
-        for vuln in vulnerabilities:
-            # 对敏感文件,使用URL去重
-            key = vuln['url']
-            if key not in seen:
-                seen.add(key)
-                unique_vulns.append(vuln)
-        
-        return unique_vulns

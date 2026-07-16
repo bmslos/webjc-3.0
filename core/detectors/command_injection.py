@@ -10,10 +10,10 @@ import time
 from typing import Dict, List, Optional
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from core.config import VULN_CONFIG
-from core.utils.logger import Logger
+from core.detectors.base import BaseDetector
 
 
-class CommandInjectionDetector:
+class CommandInjectionDetector(BaseDetector):
     """命令注入检测器"""
     
     def __init__(self, target: str, http, urls: Optional[List] = None,
@@ -29,15 +29,10 @@ class CommandInjectionDetector:
             forms: 爬虫发现的表单列表
             params: 发现的参数列表
         """
+        super().__init__(target, http, urls=urls, forms=forms, params=params, **kwargs)
         self.name = "命令注入"
-        self.target = target
-        self.http = http
-        self.urls = urls or [target]
-        self.forms = forms or []
-        self.params = params or []
-        self.logger = Logger()
         
-        config = VULN_CONFIG.get('command_injection', {})
+        config = self._load_vuln_config('command_injection')
         self.payloads = config.get('payloads', [
             '| whoami', '; whoami', '&& whoami',
             '| id', '; id',
@@ -186,16 +181,3 @@ class CommandInjectionDetector:
                 return True
         
         return False
-    
-    def _deduplicate_vulns(self, vulnerabilities: List[Dict]) -> List[Dict]:
-        """去重漏洞报告"""
-        seen = set()
-        unique_vulns = []
-        
-        for vuln in vulnerabilities:
-            key = (vuln['url'], vuln.get('parameter', ''), vuln['type'])
-            if key not in seen:
-                seen.add(key)
-                unique_vulns.append(vuln)
-        
-        return unique_vulns

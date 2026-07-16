@@ -8,10 +8,10 @@
 from typing import Dict, List, Optional
 from urllib.parse import urlparse, urljoin, urlencode
 from core.config import VULN_CONFIG
-from core.utils.logger import Logger
+from core.detectors.base import BaseDetector
 
 
-class OpenRedirectDetector:
+class OpenRedirectDetector(BaseDetector):
     """开放重定向检测器"""
     
     def __init__(self, target: str, http, urls: Optional[List] = None,
@@ -27,15 +27,10 @@ class OpenRedirectDetector:
             forms: 爬虫发现的表单列表
             params: 发现的参数列表
         """
+        super().__init__(target, http, urls=urls, forms=forms, params=params, **kwargs)
         self.name = "开放重定向"
-        self.target = target
-        self.http = http
-        self.urls = urls or [target]
-        self.forms = forms or []
-        self.params = params or []
-        self.logger = Logger()
         
-        config = VULN_CONFIG.get('open_redirect', {})
+        config = self._load_vuln_config('open_redirect')
         self.payloads = config.get('payloads', [
             'http://evil.com',
             '//evil.com',
@@ -206,17 +201,3 @@ class OpenRedirectDetector:
                     self.logger.debug(f'POST重定向测试失败: {form_action}, 错误: {str(e)}')
         
         return vulnerabilities
-    
-    def _deduplicate_vulns(self, vulnerabilities: List[Dict]) -> List[Dict]:
-        """去重漏洞报告"""
-        seen = set()
-        unique_vulns = []
-        
-        for vuln in vulnerabilities:
-            # 使用URL+参数+类型去重
-            key = (vuln['url'], vuln.get('parameter', ''), vuln['type'])
-            if key not in seen:
-                seen.add(key)
-                unique_vulns.append(vuln)
-        
-        return unique_vulns

@@ -9,10 +9,10 @@ import re
 from typing import Dict, List, Optional
 from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from core.config import VULN_CONFIG
-from core.utils.logger import Logger
+from core.detectors.base import BaseDetector
 
 
-class SSRFDetector:
+class SSRFDetector(BaseDetector):
     """SSRF服务端请求伪造检测器"""
     
     def __init__(self, target: str, http, urls: Optional[List] = None,
@@ -29,16 +29,11 @@ class SSRFDetector:
             params: 发现的参数列表
             api_endpoints: API端点列表
         """
+        super().__init__(target, http, urls=urls, forms=forms, params=params,
+                         api_endpoints=api_endpoints, **kwargs)
         self.name = "SSRF(服务端请求伪造)"
-        self.target = target
-        self.http = http
-        self.urls = urls or [target]
-        self.forms = forms or []
-        self.params = params or []
-        self.api_endpoints = api_endpoints or []
-        self.logger = Logger()
         
-        config = VULN_CONFIG.get('ssrf', {})
+        config = self._load_vuln_config('ssrf')
         self.payloads = config.get('payloads', [
             'http://127.0.0.1',
             'http://localhost',
@@ -238,16 +233,3 @@ class SSRFDetector:
                     return True
         
         return False
-    
-    def _deduplicate_vulns(self, vulnerabilities: List[Dict]) -> List[Dict]:
-        """去重漏洞报告"""
-        seen = set()
-        unique_vulns = []
-        
-        for vuln in vulnerabilities:
-            key = (vuln['url'], vuln.get('parameter', ''), vuln['type'])
-            if key not in seen:
-                seen.add(key)
-                unique_vulns.append(vuln)
-        
-        return unique_vulns

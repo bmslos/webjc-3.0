@@ -55,6 +55,38 @@ A powerful automated web application vulnerability scanner that supports 13 vuln
 | `task_manager.py` | Multi-Target & Task Persistence | SQLite database, batch scanning, task status tracking, resume from interruption, historical query |
 | `ai_analyzer.py` | AI Analysis Engine | LLM false positive filtering, intelligent payload generation, enhanced remediation recommendations (compatible with OpenAI / DeepSeek / Qwen) |
 
+### v3.1.1 Security Hardening & Quality Optimization
+
+A comprehensive code audit and four-phase improvement, totaling 22 optimizations:
+
+**Security Fixes (Critical)**
+- Fixed stored XSS in HTML reports (switched to Jinja2 autoescape for automatic escaping)
+- Restored async HTTP SSL certificate verification (was globally disabled with `ssl=False`)
+- Upgraded dependencies with known CVEs (requests/aiohttp/Jinja2/urllib3)
+- Mitigated LLM prompt injection (field truncation + defense directives + data delimiter isolation)
+- Tightened plugin loading whitelist (only accepts classes ending with Detector/Scanner)
+
+**Architecture Optimization**
+- Extracted `BaseDetector(ABC)` abstract base class, unifying `__init__`/`_deduplicate_vulns`/`_build_vuln` across 13 detectors, eliminating ~600 lines of duplicate code
+- Fixed Logger singleton `__new__` signature crash, added `set_verbose()` for runtime log level switching
+- Fixed synchronous HTTP calls blocking the event loop in async functions (added `_async_get()` compatibility method)
+- Removed dead code `session_manager.py` (never referenced)
+- Added `__init__.py` package files to normalize package structure
+
+**Quality Improvements**
+- Added 26 unit tests (BaseDetector/Logger/XSS escaping), configured pytest.ini and conftest.py
+- Fixed 3 silent exception swallowing (`except Exception: pass` → with logging)
+- Replaced 5 `print` calls with `logging` in main.py
+- Rewrote report generator with Jinja2 templates, splitting 285-line f-string into template rendering
+- Added context managers to HTTP utilities (`__enter__/__exit__` + `__aenter__/__aexit__`)
+
+**Performance Optimization**
+- LLM analysis result caching (avoids redundant calls for identical vulnerabilities)
+- TaskManager switched from per-row INSERT to `executemany` batch insertion
+- Crawler URL queue changed to `deque(maxlen=2000)`, `pop(0)` to `popleft()` (O(1))
+- Rate limiter protected with `threading.Lock`/`asyncio.Lock` for thread/coroutine safety
+- Cached `response.text` to local variables in detectors to avoid repeated decoding
+
 ## Installation
 
 ### Prerequisites
@@ -197,7 +229,7 @@ python main.py --resume
 
 | Argument | Shorthand | Default | Description |
 |----------|-----------|---------|-------------|
-| `--timeout` | `-T2` | 15 | HTTP request timeout (seconds) |
+| `--timeout` | - | 15 | HTTP request timeout (seconds) |
 | `--threads` | `-n` | 10 | Number of scan threads |
 | `--max-pages` | `-m` | 200 | Maximum pages for crawler |
 | `--rate-limit` | `-r` | 0.1 | Request interval (seconds) |
@@ -277,13 +309,14 @@ webjc-3.0/
 │   ├── scanner.py               # Scan engine (integrated with dedup / verification / AI pipeline)
 │   ├── crawler.py               # Web crawler
 │   ├── plugin_manager.py        # Plugin manager
-│   ├── session_manager.py       # Session manager
 │   ├── dedup_engine.py          # Global cross-deduplication engine (v3.1 new)
 │   ├── verification.py          # Secondary verification & context awareness (v3.1 new)
 │   ├── task_manager.py          # Multi-target task manager (v3.1 new)
 │   ├── ai_analyzer.py           # AI analysis engine (v3.1 new)
 │   │
 │   ├── detectors/               # Vulnerability detectors
+│   │   ├── __init__.py          # Package init
+│   │   ├── base.py              # Detector abstract base class (v3.1.1 new)
 │   │   ├── sqli.py              # SQL Injection detector
 │   │   ├── xss.py               # XSS detector
 │   │   ├── csrf.py              # CSRF detector
@@ -299,6 +332,7 @@ webjc-3.0/
 │   │   └── open_redirect.py     # Open Redirect detector
 │   │
 │   └── utils/                   # Utility modules
+│       ├── __init__.py          # Package init
 │       ├── http.py              # HTTP client (sync / async)
 │       ├── logger.py            # Logger
 │       └── report.py            # Report generator
@@ -307,10 +341,18 @@ webjc-3.0/
 │   └── scan_tasks.db            # SQLite task database
 │
 ├── plugins/                     # User plugin directory
-│   └── xxe_detector.py          # XXE detector example plugin
+│   ├── __init__.py              # Package init
+│   └── xxe_detector.py          # XXE detector example plugin (thin wrapper)
+│
+├── pytest.ini                   # pytest configuration (v3.1.1 new)
 │
 └── tests/                       # Unit tests
-    └── test_new_modules.py      # Tests for v3.1 new modules
+    ├── __init__.py              # Package init
+    ├── conftest.py              # pytest shared fixtures (v3.1.1 new)
+    ├── test_new_modules.py      # Tests for v3.1 new modules
+    ├── test_base_detector.py    # BaseDetector unit tests (v3.1.1 new)
+    ├── test_logger.py           # Logger unit tests (v3.1.1 new)
+    └── test_report.py           # Report XSS escaping tests (v3.1.1 new)
 ```
 
 ## Custom Plugin Development
@@ -321,42 +363,39 @@ Create a Python file in the `plugins/` directory implementing a detector class:
 
 ```python
 # plugins/my_detector.py
-from typing import Dict, List, Optional
-from core.utils.logger import Logger
+from typing import Dict, List
+from core.detectors.base import BaseDetector
 
 
-class MyDetector:
+class MyDetector(BaseDetector):
     """Custom detector example"""
-    
+
     def __init__(self, target: str, http, urls=None, forms=None, **kwargs):
+        super().__init__(target, http, urls=urls, forms=forms, **kwargs)
         self.name = "My Detector"
-        self.target = target
-        self.http = http
-        self.urls = urls or [target]
-        self.forms = forms or []
-        self.logger = Logger()
-    
+
     def scan(self) -> List[Dict]:
-        """Execute scan and return vulnerability list"""
+        """Execute scan and return vulnerability list (base class provides dedup and vuln construction)"""
         vulnerabilities = []
-        
+
         # Your detection logic
         for url in self.urls:
             response = self.http.get(url)
             if self._check_vulnerability(response):
-                vulnerabilities.append({
-                    'type': 'Vulnerability Type',
-                    'severity': 'Severity',  # Critical / High / Medium / Low / Info
-                    'url': url,
-                    'parameter': 'Parameter Name',
-                    'method': 'GET',
-                    'payload': 'Payload used',
-                    'description': 'Vulnerability description',
-                    'recommendation': 'Remediation recommendation'
-                })
-        
-        return vulnerabilities
-    
+                # Use base class _build_vuln to construct standard vulnerability dict
+                vulnerabilities.append(self._build_vuln(
+                    vuln_type='Vulnerability Type',
+                    severity='High',  # Critical / High / Medium / Low / Info
+                    url=url,
+                    parameter='Parameter Name',
+                    payload='Payload used',
+                    description='Vulnerability description',
+                    recommendation='Remediation recommendation'
+                ))
+
+        # Base class _deduplicate_vulns handles deduplication
+        return self._deduplicate_vulns(vulnerabilities)
+
     def _check_vulnerability(self, response) -> bool:
         """Check if the response indicates a vulnerability"""
         # Implement your detection logic
@@ -421,21 +460,21 @@ flake8 .
 ### Running Tests
 
 ```bash
-# Run unit tests
-pytest tests/
+# Run all unit tests
+pytest
 
-# Run tests for v3.1 new modules
-python tests/test_new_modules.py
+# Run a specific test file
+pytest tests/test_base_detector.py -v
 ```
 
 ### Adding a New Detector
 
 1. Create a new file under `core/detectors/`
-2. Implement the detector class following the standard interface
+2. Inherit from `BaseDetector` base class and implement the `scan()` method (automatically gains deduplication and vulnerability construction)
 3. Add configuration in `VULN_CONFIG` within `core/config.py`
 4. Register in `detector_mapping` within `core/scanner.py`
 
-Refer to `core/detectors/sqli.py` as a template.
+Refer to `core/detectors/base.py` for the base class interface, and `core/detectors/sqli.py` as a complete example.
 
 ## Important Notes
 
@@ -465,6 +504,36 @@ We welcome Issues and Pull Requests!
 - Participate in [Discussions](https://github.com/bmslos/webjc-3.0/discussions)
 
 ## Changelog
+
+### v3.1.1 (2026-07-16)
+
+**Security Hardening & Quality Optimization (22 improvements)**
+
+Security Fixes:
+- Fixed stored XSS in HTML reports (switched to Jinja2 autoescape)
+- Restored async HTTP SSL certificate verification (was globally disabled with `ssl=False`)
+- Upgraded dependencies with known CVEs (requests/aiohttp/Jinja2/urllib3)
+- Mitigated LLM prompt injection (field truncation + defense directives + delimiter isolation)
+- Tightened plugin loading whitelist (Detector/Scanner suffix only)
+
+Architecture Optimization:
+- Extracted `BaseDetector(ABC)` base class, eliminating ~600 lines of duplicate code across 13 detectors
+- Fixed Logger singleton `__new__` crash, added `set_verbose()` method
+- Fixed synchronous HTTP calls blocking event loop in async functions
+- Removed dead code `session_manager.py` and redundant dependency `asyncio-mqtt`
+- Added `__init__.py` package files to normalize package structure
+
+Quality Improvements:
+- Added 26 unit tests, configured pytest.ini and conftest.py
+- Fixed 3 silent exception swallowing, replaced 5 `print` calls with `logging`
+- Rewrote report generator with Jinja2 templates, splitting 285-line function
+- Added context managers to HTTP utilities (`__enter__/__exit__` + `__aenter__/__aexit__`)
+
+Performance Optimization:
+- LLM analysis result caching (avoids redundant calls)
+- TaskManager batch INSERT via `executemany`
+- Crawler URL queue changed to `deque(maxlen=2000)`, `pop(0)` to `popleft()` (O(1))
+- Rate limiter protected with `threading.Lock`/`asyncio.Lock`
 
 ### v3.1 (2026-05-14)
 
